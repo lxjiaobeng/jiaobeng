@@ -1,0 +1,375 @@
+import pyautogui
+import time
+import xlrd
+import pyperclip
+from tkinter import *
+import webbrowser as web
+import tkinter.messagebox
+import threading
+import cv2
+import math
+#t是指令执行间隔
+t=0.1
+class MyThread(threading.Thread):
+    def __init__(self, func, *args):
+        super().__init__()
+
+        self.func = func
+        self.args = args
+
+        self.setDaemon=True
+        self.start()    # 在这里开始
+
+    def run(self):
+        self.func(*self.args)
+# 定义鼠标事件
+def mouseClick(clickTimes, lOrR, img, reTry):
+    if reTry == 1:
+        A=0
+        while True:
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.9)
+            if location is not None:
+                pyautogui.click(location.x, location.y, clicks=clickTimes, interval=0.2, duration=0.2, button=lOrR)
+                break
+            if A ==0:
+               A+=1
+               text.insert(END, '未找到匹配图片，等待图片出现\n')
+               text.update()
+               text.see(END)
+               time.sleep(t)
+            if A ==2:
+                text.insert(END, '开始等待第{}次扫描\n'.format(A))
+                text.update()
+                text.see(END)
+                time.sleep(t)
+            if A>2:
+                text.insert(END, '第{}次扫描\n'.format(A))
+                text.update()
+                text.see(END)
+                time.sleep(t)
+            A+=1
+    elif reTry == -1:
+        while True:
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.9)
+            if location is not None:
+                pyautogui.click(location.x, location.y, clicks=clickTimes, interval=0.2, duration=0.2, button=lOrR)
+            time.sleep(t)
+    elif reTry > 1:
+        i = 1
+        while i < reTry + 1:
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.9)
+            if location is not None:
+                pyautogui.click(location.x, location.y, clicks=clickTimes, interval=0.2, duration=0.2, button=lOrR)
+                text.insert(END,'重复\n')
+                text.update()
+                text.see(END)
+                i += 1
+            time.sleep(t)
+
+
+# 数据检查与操作类型
+# cmdType.value  1.0 左键单击    2.0 左键双击  3.0 右键单击  4.0 输入  5.0 等待  6.0 滚轮 7.0 鼠标横向拖动
+#                8.0 鼠标纵向拖动  9.0 原地长按
+#                10.x 检擦是否出现某图片，若不出现则返回上n步n=x,x取1到99。
+#                11.x 判断是否出现某图片，若出现则进行下x步，不出现则跳过下x步，x取1到99。
+#                12.x 循环指令，循环上面x行循环选定次数，x取1到99。13循环开始指令，
+#                14   定时启动程序,时间打单引号（英文输入法）
+#                15.x 优先选择指令，从下x行优先选择单击指令进行执行，x行的优先先度取决于x的值，x越小优先度越高，x取0到99。使用前初始化累加器的值为x的最大值并增加开始选择指令17
+#                16   初始化累加器的值，17选择开始指令
+# ctype     空：0
+#           字符串：1
+#           数字：2
+#           日期：3
+#           布尔：4
+#           error：5
+def dataCheck(sheet1):
+    checkCmd = True
+    # 行数检查
+    if sheet1.nrows < 2:
+        text.insert(END, '数据找不到了\n')
+        text.update()
+        text.see(END)
+        checkCmd = False
+    # 每行数据检查
+    i = 1
+    k= sheet1.nrows
+    while i < sheet1.nrows:
+        # 第1列 操作类型检查
+        cmdType = sheet1.row(i)[0]
+        if cmdType.ctype != 2 or (cmdType.value != 1.0 and cmdType.value != 2.0 and cmdType.value != 3.0
+                                  and cmdType.value != 4.0 and cmdType.value != 5.0 and cmdType.value != 6.0and cmdType.value != 7.0
+                                  and cmdType.value != 8.0and cmdType.value !=9.0and cmdType.value != 12.0
+                                  and 0<=cmdType.value-10.0<1 and 0<=cmdType.value-11.0<1 and 0<=cmdType.value-12.0<1 and cmdType.value != 14.0
+                                  and 0 <= cmdType.value - 15.0 < 1  and cmdType.value != 16.0 and cmdType.value != 17.0):
+            text.insert(END,'第{}行,第1列数据有毛病\n'.format(i+1))
+            text.update()
+            text.see(END)
+            checkCmd = False
+        # 第2列 内容检查
+        cmdValue = sheet1.row(i)[1]
+        # 读图点击类型指令，内容必须为字符串类型
+        if cmdType.value == 1.0 or cmdType.value == 2.0 or cmdType.value == 3.0 or cmdType.value==10:
+            if cmdValue.ctype != 1:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        # 输入类型，内容不能为空
+        if cmdType.value == 4.0:
+            if cmdValue.ctype == 0:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        # 等待类型，内容必须为数字
+        if cmdType.value == 5.0:
+            if cmdValue.ctype != 2:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        # 滚轮事件，内容必须为数字
+        if cmdType.value == 6.0:
+            if cmdValue.ctype != 2:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        #拖动类型事件，内容必须是数字
+        if cmdType.value==7.0:
+            if cmdValue.ctype != 2:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        if cmdType.value==8.0:
+            if cmdValue.ctype != 2:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        if cmdType.value == 9.0:
+            if cmdValue.ctype != 2:
+                text.insert(END,'第{}行,第2列数据有毛病\n'.format(i+1))
+                text.update()
+                text.see(END)
+                checkCmd = False
+        i += 1
+        text.insert(END,'第{}行数据正确\n'.format(i))
+        text.update()
+        text.see(END)
+    return checkCmd
+def mainwork(sheet1):
+    text.insert(END,'开始运行\n')
+    text.update()
+    i = 1 #脚本运行行数指针
+    l = 1 #循环次数计数器
+    A = 0 #通用累加器
+    j = 1 #选择计数器
+    k=sheet1.nrows
+    while i < k:
+        # 取本行指令的操作类型
+        cmdType = sheet1.row(i)[0]
+        if cmdType.value == 1.0:
+            # 取图片名称
+            img = sheet1.row(i)[1].value.convert('L')
+            reTry = 1
+            if sheet1.row(i)[2].ctype == 2 and sheet1.row(i)[2].value != 0:
+                reTry = sheet1.row(i)[2].value
+            mouseClick(1, "left", img, reTry)
+            text.insert(END,"单击左键{}\n".format(img))
+            text.update()
+            text.see(END)
+        # 2代表双击左键
+        elif cmdType.value == 2.0:
+            # 取图片名称
+            img = sheet1.row(i)[1].value
+            # 取重试次数
+            reTry = 1
+            if sheet1.row(i)[2].ctype == 2 and sheet1.row(i)[2].value != 0:
+                reTry = sheet1.row(i)[2].value
+            mouseClick(2, "left", img, reTry)
+            text.insert(END, "双击左键{}\n".format(img))
+            text.update()
+            text.see(END)
+        # 3代表右键
+        elif cmdType.value == 3.0:
+            # 取图片名称
+            img = sheet1.row(i)[1].value
+            # 取重试次数
+            reTry = 1
+            if sheet1.row(i)[2].ctype == 2 and sheet1.row(i)[2].value != 0:
+                reTry = sheet1.row(i)[2].value
+            mouseClick(1, "right", img, reTry)
+            text.insert(END,"单击右键{}\n".format(img))
+            text.update()
+            text.see(END)
+            # 4代表输入
+        elif cmdType.value == 4.0:
+            inputValue = sheet1.row(i)[1].value
+            pyperclip.copy(inputValue)
+            pyautogui.hotkey('ctrl', 'v')
+            time.sleep(0.5)
+            text.insert(END,"输入:{}\n".format( inputValue))
+            text.update()
+            text.see(END)
+            # 5代表等待
+        elif cmdType.value == 5.0:
+            # 取图片名称
+            waitTime = sheet1.row(i)[1].value
+            text.insert(END,"等待{}秒\n".format(waitTime))
+            text.update()
+            text.see(END)
+            time.sleep(waitTime)
+            text.insert(END,"等待完成\n".format(waitTime))
+            text.update()
+            text.see(END)
+        # 6代表滚轮
+        elif cmdType.value == 6.0:
+            # 取图片名称
+            scroll = sheet1.row(i)[1].value
+            pyautogui.scroll(int(scroll))
+            text.insert(END,"滚轮滑动{}距离\n".format(scroll))
+            text.update()
+            text.see(END)
+        elif cmdType.value==7.0:
+            scroll = sheet1.row(i)[1].value
+            pyautogui.dragRel(int(scroll),0,1.5,button='left')
+            text.insert(END, '横向滑动{}\n'.format(scroll))
+            text.update()
+            text.see(END)
+        elif cmdType.value==8.0:
+            scroll = sheet1.row(i)[1].value
+            pyautogui.dragRel(0,int(scroll),1.5,button='left')
+            text.insert(END,'纵向滑动{}\n'.format(scroll))
+            text.update()
+            text.see(END)
+        elif cmdType.value==9.0:
+            scroll = sheet1.row(i)[1].value
+            pyautogui.mouseDown()
+            time.sleep(int(scroll))
+            pyautogui.mouseUp()
+            text.insert(END,'长按{}秒\n'.format(int(scroll)))
+            text.update()
+            text.see(END)
+        elif 0<=cmdType.value-10.0<1:
+            m=int(round(((cmdType.value-10.0)),2)*100)
+            img = sheet1.row(i)[1].value
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.9)
+            if location is not None:
+                text.insert(END, "出现图片，脚本继续\n")
+                text.update()
+                text.see(END)
+            if location is None:
+                i=i-m-1
+                text.insert(END, "未出现图片，返回上{}步\n".format(m))
+                text.update()
+                text.see(END)
+        elif 0<=cmdType.value-11.0<1:
+            m =int(round(((cmdType.value-11.0)),2)*100)
+            print(m)
+            img = sheet1.row(i)[1].value
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.9)
+            if location is not None:
+                text.insert(END, "出现图片，进行下{}步\n".format(m))
+                text.update()
+                text.see(END)
+            if location is None:
+                i=i+m
+                text.insert(END, "未出现图片，跳过{}步\n".format(m))
+                text.update()
+                text.see(END)
+        elif 0<=cmdType.value-12.0<1:
+            n = sheet1.row(i)[1].value
+            m=int(round(((cmdType.value-12.0)),2)*100)
+            text.insert(END, "第{}次循环完成\n".format(l))
+            text.update()
+            text.see(END)
+            if l<=n:
+                i=i-m-1
+                l+=1
+        elif cmdType.value == 13.0:
+            l=1
+            text.insert(END, "开始循环\n")
+        elif cmdType.value == 14.0:
+            time_now= time.strftime("%H:%M:%S", time.localtime())
+            text.insert(END,'现在时间：{}\n'.format(time_now))
+            text.update()
+            text.see(END)
+            print(sheet1.row(i)[1].value)
+            print(time_now)
+            if  sheet1.row(i)[1].value>time_now:
+                i-=1
+                text.insert(END, "时间没到，等待60秒再次检查\n")
+                text.update()
+                text.see(END)
+                time.sleep(60)
+            elif sheet1.row(i)[1].value<time_now:
+                text.insert(END, "时间到了，开始运行\n")
+                text.update()
+                text.see(END)
+        elif 0 <= cmdType.value - 15.0 < 1: #15.x 优先选择指令，从下x行优先选择某一个单击指令进行执行，x行的优先先度取决于x的值，x越小优先度越高，x取0到99。
+            n = int(A)
+            m = int(round(((cmdType.value - 15.0)), 2) * 100)
+            img=sheet1.row(i)[1].value
+            location = pyautogui.locateCenterOnScreen(img, confidence=0.9)
+            if location is not None:
+                i=i+n-m
+                pyautogui.click(location.x, location.y, clicks=1, interval=0.2, duration=0.2,button='left')
+                text.insert(END, "单击{}此为第{}号图片\n".format(img,m))
+                text.update()
+                text.see(END)
+            if location is None:
+                j=j+1
+                text.insert(END, "未出现图片，扫描下一个，此图片为第{}个\n".format(m))
+                text.update()
+                text.see(END)
+                if j == A +1:
+                    i=int(j-A-1)
+                    j=0
+                    text.insert(END, "未发现图片，重新扫描\n".format(m))
+                    text.update()
+                    text.see(END)
+        elif cmdType.value == 16.0:
+            A = sheet1.row(i)[1].value
+            text.insert(END, "累加器A={},\n".format(A))
+            text.update()
+            text.see(END)
+        elif cmdType.value == 17.0:
+            j=1
+            text.insert(END, "开始选择\n")
+            text.update()
+            text.see(END)
+        i += 1
+    text.insert(END,'脚本运行完成')
+def dak():
+    r = run.get()
+    wb = xlrd.open_workbook(filename='{}'.format(r))
+    sheet1 = wb.sheet_by_index(0)
+    checkCmd = dataCheck(sheet1)
+def callback():
+    text.insert(END,'欢迎使用赛尔号启航脚本\n')
+    text.update()
+    text.see(END)
+    r = run.get()
+    wb = xlrd.open_workbook(filename='{}'.format(r))
+    sheet1 = wb.sheet_by_index(0)
+    mainwork(sheet1)
+if __name__ == '__main__':
+    k=0
+    win = Tk()
+    win.wm_attributes('-topmost', 1)
+    win.title('赛尔号启航')
+    win.geometry("220x250+0+200")
+    label = Label(win, text="赛尔号启航脚本", font=("华文行楷", 17)).pack()
+    run = tkinter.StringVar()
+    win_label2 = Label(win, text="脚本地址:",).pack()
+    Entry(win, width=500, textvariable=run).pack()
+    b1 = Button(win, text="选定脚本", command=lambda :dak()).pack()
+    b2 = Button(win, text="开始运行", command=lambda :MyThread(callback())).pack()
+    text = Text(win, width=250, height=800 )
+    scroll = tkinter.Scrollbar()
+    scroll.pack(side=tkinter.RIGHT, fill=tkinter.Y)
+    text.pack()
+    text.insert(END,"常用脚本：\njingyan.xlsx\ndaluandou.xlsx\njingjiliansai.xlsx\n")
+    win.mainloop()
